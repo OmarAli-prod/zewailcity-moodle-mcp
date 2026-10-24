@@ -1,4 +1,4 @@
-# moodle-mcp
+# zewailcity-moodle-mcp
 
 Connects Claude to your [Zewail City Moodle](https://moodle.zewailcity.edu.eg) account. From the chat you can ask what's due, have Claude open a reading or pull the text out of lecture slides, or check a grade.
 
@@ -21,7 +21,7 @@ It's a small Go program that runs on your own laptop. It signs in with the perso
 On macOS or Linux:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/OmarAli-prod/moodle-mcp/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/OmarAli-prod/zewailcity-moodle-mcp/main/install.sh | sh
 ```
 
 This downloads the latest release, checks its checksum, and puts two commands in `~/.local/bin`: `moodle` for you and `moodle-mcp` for Claude. Set `BIN_DIR=/somewhere/else` before `sh` to change the folder. If your shell then says `command not found`, add that folder to your `PATH`.
@@ -29,7 +29,7 @@ This downloads the latest release, checks its checksum, and puts two commands in
 On Windows, or if you'd rather build it yourself, install [Go](https://go.dev/dl/) 1.25+ and run:
 
 ```bash
-go install github.com/OmarAli-prod/moodle-mcp/cmd/...@latest   # or: go install ./cmd/... from a clone
+go install github.com/OmarAli-prod/zewailcity-moodle-mcp/cmd/...@latest   # or: go install ./cmd/... from a clone
 ```
 
 That puts the commands in `$(go env GOPATH)/bin` instead.

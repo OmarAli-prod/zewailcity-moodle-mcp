@@ -5,7 +5,7 @@ import (
 	"context"
 	"log"
 
-	moodle "github.com/OmarAli-prod/moodle-mcp"
+	moodle "github.com/OmarAli-prod/zewailcity-moodle-mcp"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 

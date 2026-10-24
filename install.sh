@@ -1,10 +1,10 @@
 #!/bin/sh
 # Installs the latest moodle and moodle-mcp binaries on macOS or Linux.
-#   curl -fsSL https://raw.githubusercontent.com/OmarAli-prod/moodle-mcp/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/OmarAli-prod/zewailcity-moodle-mcp/main/install.sh | sh
 # Set BIN_DIR to choose where they go (default ~/.local/bin).
 set -eu
 
-repo=OmarAli-prod/moodle-mcp
+repo=OmarAli-prod/zewailcity-moodle-mcp
 bin_dir=${BIN_DIR:-$HOME/.local/bin}
 
 case $(uname -s) in

@@ -1,4 +1,4 @@
-module github.com/OmarAli-prod/moodle-mcp
+module github.com/OmarAli-prod/zewailcity-moodle-mcp
 
 go 1.26.4
 

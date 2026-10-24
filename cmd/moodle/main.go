@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	moodle "github.com/OmarAli-prod/moodle-mcp"
+	moodle "github.com/OmarAli-prod/zewailcity-moodle-mcp"
 	"golang.org/x/term"
 )
 
