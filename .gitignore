@@ -1,0 +1,15 @@
+# Build output
+/moodle
+/moodle-mcp
+*.exe
+dist/
+
+# Never commit a Moodle token
+config.json
+.env
+*.token
+
+# OS
+.DS_Store
+Thumbs.db
+CLAUDE.md
