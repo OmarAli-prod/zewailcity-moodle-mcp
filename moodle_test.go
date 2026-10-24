@@ -110,6 +110,16 @@ func TestHTMLToText(t *testing.T) {
 	if strings.Contains(text, "track()") {
 		t.Error("script leaked")
 	}
+
+	// Word-pasted tables wrap every cell in <p>; each row should still be one line.
+	table := HTMLToText("<table><tr><td><p>Quizzes</p></td><td><p>10%</p></td></tr>" +
+		"<tr><td><p>Final</p></td><td><p>40%</p></td></tr></table>")
+	if table != "| Quizzes | 10%\n| Final | 40%" {
+		t.Errorf("table: %q", table)
+	}
+	if li := HTMLToText("<ul>\n<li>\n<p>Review labs</p>\n</li>\n<li><p>Practice</p></li></ul>"); li != "- Review labs\n- Practice" {
+		t.Errorf("list: %q", li)
+	}
 }
 
 func TestFmtTime(t *testing.T) {
@@ -267,5 +277,68 @@ func TestServerTools(t *testing.T) {
 	r, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "moodle_whoami"})
 	if err != nil || !r.IsError {
 		t.Errorf("got %v, %v", r, err)
+	}
+
+	prompts, err := cs.ListPrompts(ctx, nil)
+	if err != nil || len(prompts.Prompts) != 3 {
+		t.Errorf("prompts: %v, %v", prompts, err)
+	}
+	p, err := cs.GetPrompt(ctx, &mcp.GetPromptParams{Name: "study_course", Arguments: map[string]string{"course": "MATH104"}})
+	if err != nil || !strings.Contains(p.Messages[0].Content.(*mcp.TextContent).Text, `"MATH104"`) {
+		t.Errorf("study_course: %v, %v", p, err)
+	}
+	resources, err := cs.ListResources(ctx, nil)
+	templates, err2 := cs.ListResourceTemplates(ctx, nil)
+	if err != nil || err2 != nil || len(resources.Resources) != 2 || len(templates.ResourceTemplates) != 1 {
+		t.Errorf("resources: %v %v, %v %v", resources, templates, err, err2)
+	}
+}
+
+func TestSaveSubmissionUploadsThenSaves(t *testing.T) {
+	var calls []string
+	var saved url.Values
+	c := fake(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/webservice/upload.php":
+			_ = r.ParseMultipartForm(1 << 20)
+			f, h, err := r.FormFile("file_1")
+			if err != nil || h.Filename != "report.pdf" || r.FormValue("filearea") != "draft" {
+				t.Errorf("bad upload: %v %v", h, err)
+			} else {
+				f.Close()
+			}
+			calls = append(calls, "upload")
+			_, _ = w.Write([]byte(`[{"itemid": 777}]`))
+		default:
+			_ = r.ParseForm()
+			fn := r.PostForm.Get("wsfunction")
+			calls = append(calls, fn)
+			switch fn {
+			case "mod_assign_save_submission":
+				saved = r.PostForm
+				_, _ = w.Write([]byte(`[]`))
+			case "mod_assign_submit_for_grading":
+				_, _ = w.Write([]byte(`[]`))
+			default:
+				_, _ = w.Write([]byte(`{"lastattempt": {"submission": {"status": "submitted"}}}`))
+			}
+		}
+	})
+	file := filepath.Join(t.TempDir(), "report.pdf")
+	_ = os.WriteFile(file, []byte("%PDF"), 0o644)
+	text := "<p>hi</p>"
+	res, err := c.SaveSubmission(42, &text, []string{file}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(calls, ",") != "upload,mod_assign_save_submission,mod_assign_submit_for_grading,mod_assign_get_submission_status" {
+		t.Errorf("calls: %v", calls)
+	}
+	if saved.Get("plugindata[files_filemanager]") != "777" || saved.Get("plugindata[onlinetext_editor][text]") != text ||
+		saved.Get("assignmentid") != "42" {
+		t.Errorf("saved form: %v", saved)
+	}
+	if obj(res["status_now"])["submission"] != "submitted" || res["submitted_for_grading"] != true {
+		t.Errorf("result: %v", res)
 	}
 }

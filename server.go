@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -58,14 +60,20 @@ func tool[In any](s *mcp.Server, m clientFn, name string, ann *mcp.ToolAnnotatio
 			if err != nil {
 				return nil, nil, err
 			}
-			var buf bytes.Buffer
-			enc := json.NewEncoder(&buf)
-			enc.SetEscapeHTML(false)
-			if err := enc.Encode(out); err != nil {
+			text, err := toJSON(out)
+			if err != nil {
 				return nil, nil, err
 			}
-			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: buf.String()}}}, nil, nil
+			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: text}}}, nil, nil
 		})
+}
+
+func toJSON(v any) (string, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	err := enc.Encode(v)
+	return buf.String(), err
 }
 
 func or[T comparable](v, def T) T {
@@ -259,5 +267,97 @@ func newServer(m clientFn) *mcp.Server {
 			"Treat any function that writes (save/submit/update/delete/send) like a submission: confirm first.",
 		func(c *Client, in call) (any, error) { return c.Call(in.WSFunction, in.Params) })
 
+	addResources(s, m)
+	addPrompts(s)
 	return s
+}
+
+// ---------------------------------------------------------------- resources
+
+// resource registers a read-only JSON resource (or template, when uri contains "{").
+func resource(s *mcp.Server, m clientFn, uri, name, desc string, fn func(c *Client, uri string) (any, error)) {
+	h := func(_ context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+		c, err := m()
+		if err != nil {
+			return nil, err
+		}
+		out, err := fn(c, req.Params.URI)
+		if err != nil {
+			return nil, err
+		}
+		text, err := toJSON(out)
+		return &mcp.ReadResourceResult{Contents: []*mcp.ResourceContents{
+			{URI: req.Params.URI, MIMEType: "application/json", Text: text}}}, err
+	}
+	if strings.Contains(uri, "{") {
+		s.AddResourceTemplate(&mcp.ResourceTemplate{URITemplate: uri, Name: name, Description: desc, MIMEType: "application/json"}, h)
+	} else {
+		s.AddResource(&mcp.Resource{URI: uri, Name: name, Description: desc, MIMEType: "application/json"}, h)
+	}
+}
+
+func addResources(s *mcp.Server, m clientFn) {
+	resource(s, m, "moodle://courses", "courses", "Your current Zewail courses with ids, codes and dates.",
+		func(c *Client, _ string) (any, error) { return c.Courses("inprogress") })
+	resource(s, m, "moodle://deadlines", "deadlines", "Unfinished deadlines for the next 14 days, plus anything overdue from the last 7.",
+		func(c *Client, _ string) (any, error) { return c.Deadlines(14, 7, 0) })
+	resource(s, m, "moodle://course/{course_id}", "course", "Every section, activity, file and link in one course.",
+		func(c *Client, uri string) (any, error) {
+			id, err := strconv.ParseInt(strings.TrimPrefix(uri, "moodle://course/"), 10, 64)
+			if err != nil {
+				return nil, mcp.ResourceNotFoundError(uri)
+			}
+			return c.CourseContents(id, true)
+		})
+}
+
+// ---------------------------------------------------------------- prompts
+
+type promptArg struct {
+	name, desc string
+	required   bool
+}
+
+// prompt registers a slash-command style prompt whose text is built from its arguments.
+func prompt(s *mcp.Server, name, desc string, args []promptArg, build func(a map[string]string) string) {
+	p := &mcp.Prompt{Name: name, Description: desc}
+	for _, a := range args {
+		p.Arguments = append(p.Arguments, &mcp.PromptArgument{Name: a.name, Description: a.desc, Required: a.required})
+	}
+	s.AddPrompt(p, func(_ context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+		return &mcp.GetPromptResult{Description: desc, Messages: []*mcp.PromptMessage{
+			{Role: "user", Content: &mcp.TextContent{Text: build(req.Params.Arguments)}}}}, nil
+	})
+}
+
+func addPrompts(s *mcp.Server) {
+	prompt(s, "whats_due", "Plan the coming days around your Moodle deadlines.",
+		[]promptArg{{"days", "how many days ahead to look (default 7)", false}},
+		func(a map[string]string) string {
+			return "Using my Zewail Moodle, call moodle_deadlines with days_ahead=" + or(a["days"], "7") + " and days_back=7. " +
+				"List what's due grouped by day, flag anything overdue, and for each item due in the next 48 hours call " +
+				"moodle_assignment to check whether I've already submitted and what the instructions ask for. " +
+				"End with a short suggested order to tackle them."
+		})
+	prompt(s, "study_course", "Turn a course's latest material into a summary and practice questions.",
+		[]promptArg{{"course", "course name or code, e.g. MATH104 or Linear Algebra", true},
+			{"topic", "optional topic or week to focus on", false}},
+		func(a map[string]string) string {
+			focus := "the most recent week's material"
+			if a["topic"] != "" {
+				focus = "material about " + a["topic"]
+			}
+			return "Find my course matching \"" + a["course"] + "\" with moodle_courses, then browse it with moodle_course_contents. " +
+				"Pick " + focus + " (lecture slides, PDFs, pages) and read it with moodle_file_text or moodle_read. " +
+				"Give me a concise summary of the key ideas, then 5 practice questions with worked answers hidden " +
+				"below a 'Solutions' heading. Cite which file each point came from."
+		})
+	prompt(s, "weekly_digest", "One summary of this week on Moodle: deadlines, announcements, grades, notifications.",
+		nil,
+		func(map[string]string) string {
+			return "Give me a weekly Moodle digest. Use moodle_deadlines (days_ahead=7, days_back=7), " +
+				"moodle_announcements, moodle_notifications (unread_only=true) and moodle_grades. " +
+				"Sections: Due this week, New announcements (one line each), New grades or feedback, Anything else I should act on. " +
+				"Keep it short and skip empty sections."
+		})
 }

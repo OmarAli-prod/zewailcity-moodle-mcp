@@ -1,5 +1,11 @@
 # zewailcity-moodle-mcp
 
+[![CI](https://github.com/OmarAli-prod/zewailcity-moodle-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/OmarAli-prod/zewailcity-moodle-mcp/actions/workflows/ci.yml)
+[![Release](https://github.com/OmarAli-prod/zewailcity-moodle-mcp/actions/workflows/release.yml/badge.svg)](https://github.com/OmarAli-prod/zewailcity-moodle-mcp/actions/workflows/release.yml)
+[![Latest release](https://img.shields.io/github/v/release/OmarAli-prod/zewailcity-moodle-mcp)](https://github.com/OmarAli-prod/zewailcity-moodle-mcp/releases/latest)
+[![Go version](https://img.shields.io/github/go-mod/go-version/OmarAli-prod/zewailcity-moodle-mcp)](go.mod)
+[![License: MIT](https://img.shields.io/github/license/OmarAli-prod/zewailcity-moodle-mcp)](LICENSE)
+
 Connects Claude to your [Zewail City Moodle](https://moodle.zewailcity.edu.eg) account. From the chat you can ask what's due, have Claude open a reading or pull the text out of lecture slides, or check a grade.
 
 It's a small Go program that runs on your own laptop. It signs in with the personal token Moodle gives its phone app and calls the same web-service API the app uses, so Claude sees what you'd see in the app and nothing more. It doesn't scrape pages or need your Office 365 password.
@@ -96,6 +102,36 @@ Use the full path that `which moodle-mcp` prints (on Windows, `where moodle-mcp`
 | `moodle_call`                   | Call any of those functions directly (the escape hatch)                    |
 | `moodle_submit_assignment` ⚠️ | Save a submission. Stays a draft unless you say to finalise                |
 
+### Prompts
+
+Ready-made requests you can pick from your client's prompt menu (in Claude Code, type `/` and look for the `moodle` entries).
+
+| Prompt | What it does |
+| --- | --- |
+| `whats_due` | Deadlines grouped by day, with submission status for anything due in 48 hours. Optional `days` |
+| `study_course` | Summary and practice questions from a course's latest material. Takes `course`, optional `topic` |
+| `weekly_digest` | Deadlines, announcements, new grades and notifications in one summary |
+
+### Resources
+
+Context you can attach to a conversation (in Claude Code, type `@` and pick a `moodle://` entry).
+
+| Resource | Contents |
+| --- | --- |
+| `moodle://courses` | Your current courses with ids |
+| `moodle://deadlines` | The next 14 days of deadlines, plus overdue items |
+| `moodle://course/{course_id}` | Every section, activity and file in one course |
+
+### Claude skill
+
+[`skills/zewail-moodle`](skills/zewail-moodle/SKILL.md) teaches Claude how to use these tools well: which tool answers which question, how Zewail course codes look, how to page through long files, and to confirm before submitting anything. Install it for Claude Code:
+
+```bash
+mkdir -p ~/.claude/skills && cp -r skills/zewail-moodle ~/.claude/skills/
+```
+
+In the Claude apps, zip the `zewail-moodle` folder and upload it under Settings > Capabilities > Skills.
+
 ## The `moodle` command
 
 Put `--json` before any command for raw output.
@@ -160,4 +196,6 @@ npx @modelcontextprotocol/inspector moodle-mcp    # click through the tools in a
 | Claude doesn't list the tools                          | Start a new session after adding the server. In Claude Desktop, use the full path to `moodle-mcp` |
 | A file says it can't extract text                      | Use `moodle download` and open the file instead                                                   |
 
-# ## Not affiliated with Moodle Pty Ltd or Zewail City.
+## License
+
+[MIT](LICENSE). Not affiliated with Moodle Pty Ltd or Zewail City.

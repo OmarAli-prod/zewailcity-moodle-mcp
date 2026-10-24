@@ -37,6 +37,15 @@ for b in moodle moodle-mcp; do
 done
 echo "Installed moodle and moodle-mcp to $bin_dir"
 
+# Claude Code users also get the skill that teaches Claude to use the tools.
+if [ -d "$HOME/.claude" ]; then
+  skill_dir=$HOME/.claude/skills/zewail-moodle
+  mkdir -p "$skill_dir"
+  if curl -fsSL "https://raw.githubusercontent.com/$repo/main/skills/zewail-moodle/SKILL.md" -o "$skill_dir/SKILL.md"; then
+    echo "Installed the zewail-moodle skill to $skill_dir"
+  fi
+fi
+
 case ":$PATH:" in
   *":$bin_dir:"*) ;;
   *) echo "Add $bin_dir to your PATH, e.g. echo 'export PATH=\"$bin_dir:\$PATH\"' >> ~/.zshrc" ;;

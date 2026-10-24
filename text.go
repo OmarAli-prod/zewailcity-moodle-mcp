@@ -22,6 +22,7 @@ var (
 	spaces    = regexp.MustCompile(`[ \t]+`)
 	lineEdges = regexp.MustCompile(` *\n *`)
 	blankRuns = regexp.MustCompile(`\n{3,}`)
+	liGap     = regexp.MustCompile(`\n+-(\n+| )`) // <li><p>text</p></li> leaves "-" alone, with blank lines around it
 )
 
 // HTMLToText flattens Moodle HTML into readable text, keeping list items, table cells and link targets.
@@ -31,7 +32,15 @@ func HTMLToText(s string) string {
 	}
 	var b strings.Builder
 	z := html.NewTokenizer(strings.NewReader(s))
-	skip, href := 0, ""
+	skip, table, href := 0, 0, ""
+	// Inside a table, only the end of a row breaks the line, so each row reads as "| a | b".
+	brk := func() {
+		if table > 0 {
+			b.WriteString(" ")
+		} else {
+			b.WriteString("\n")
+		}
+	}
 	for {
 		tt := z.Next()
 		if tt == html.ErrorToken {
@@ -42,18 +51,25 @@ func HTMLToText(s string) string {
 		switch tt {
 		case html.TextToken:
 			if skip == 0 {
-				b.Write(z.Text())
+				text := string(z.Text())
+				if table > 0 {
+					text = strings.ReplaceAll(text, "\n", " ")
+				}
+				b.WriteString(text)
 			}
 		case html.StartTagToken, html.SelfClosingTagToken:
 			switch {
 			case tag == "script" || tag == "style":
 				skip++
-			case tag == "li":
-				b.WriteString("\n- ")
-			case blockTags[tag]:
+			case tag == "table":
+				table++
 				b.WriteString("\n")
 			case tag == "td" || tag == "th":
 				b.WriteString(" | ")
+			case tag == "li":
+				b.WriteString("\n- ")
+			case blockTags[tag]:
+				brk()
 			case tag == "a":
 				for {
 					k, v, more := z.TagAttr()
@@ -72,14 +88,20 @@ func HTMLToText(s string) string {
 			case tag == "a" && href != "":
 				b.WriteString(" <" + href + ">")
 				href = ""
-			case blockTags[tag]:
+			case tag == "table":
+				table = max(table-1, 0)
 				b.WriteString("\n")
+			case tag == "tr":
+				b.WriteString("\n")
+			case blockTags[tag]:
+				brk()
 			}
 		}
 	}
 	text := strings.ReplaceAll(b.String(), " ", " ")
 	text = spaces.ReplaceAllString(text, " ")
 	text = lineEdges.ReplaceAllString(text, "\n")
+	text = liGap.ReplaceAllString(text, "\n- ")
 	return strings.TrimSpace(blankRuns.ReplaceAllString(text, "\n\n"))
 }
 
