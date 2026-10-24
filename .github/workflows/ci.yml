@@ -7,12 +7,15 @@ on:
 
 jobs:
   test:
-    name: ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - { name: Linux, runner: ubuntu-latest }
+          - { name: macOS, runner: macos-latest }
+          - { name: Windows, runner: windows-latest }
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6

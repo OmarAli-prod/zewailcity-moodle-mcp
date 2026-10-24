@@ -32,6 +32,8 @@ curl -fsSL https://raw.githubusercontent.com/OmarAli-prod/zewailcity-moodle-mcp/
 
 This downloads the latest release, checks its checksum, and puts two commands in `~/.local/bin`: `moodle` for you and `moodle-mcp` for Claude. Set `BIN_DIR=/somewhere/else` before `sh` to change the folder. If your shell then says `command not found`, add that folder to your `PATH`.
 
+You can also grab the binaries by hand from the [latest release](https://github.com/OmarAli-prod/zewailcity-moodle-mcp/releases/latest). They're plain, static executables named `moodle_linux_amd64`, `moodle-mcp_darwin_arm64` and so on. Download one, `chmod +x` it, and run it.
+
 On Windows, or if you'd rather build it yourself, install [Go](https://go.dev/dl/) 1.25+ and run:
 
 ```bash

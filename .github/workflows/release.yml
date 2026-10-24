@@ -1,22 +1,42 @@
 name: Release
 
-# Push a tag like v0.2.0 to build binaries and publish a GitHub release.
+# Every push to main that changes code publishes the next patch version (v0.2.0, v0.2.1, ...)
+# with plain, static binaries for Linux and macOS. Docs-only pushes don't release.
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
+    paths-ignore: ["**.md", "docs/**", "skills/**", "LICENSE", ".gitignore", ".gitattributes"]
 
 permissions:
   contents: write
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   release:
-    runs-on: ubuntu-latest
+    name: Linux and macOS binaries
+    runs-on: ubuntu-latest # GitHub's Linux build machine; the binaries run on any Linux
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # tags, to work out the next version
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
       - run: go test ./...
+      - name: Next version
+        id: version
+        run: |
+          last=$(git tag --list 'v*' --sort=-v:refname | head -1)
+          if [ -z "$last" ]; then
+            next=v0.2.0
+          else
+            IFS=. read -r major minor patch <<< "${last#v}"
+            next="v$major.$minor.$((patch + 1))"
+          fi
+          echo "tag=$next" >> "$GITHUB_OUTPUT"
       - name: Build
         env:
           CGO_ENABLED: "0"
@@ -24,13 +44,12 @@ jobs:
           mkdir dist
           for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
             export GOOS=${target%/*} GOARCH=${target#*/}
-            name=moodle-mcp_${GOOS}_${GOARCH}
-            mkdir -p build/$name
-            go build -trimpath -ldflags="-s -w" -o build/$name/ ./cmd/...
-            tar -czf dist/$name.tar.gz -C build/$name .
+            for cmd in moodle moodle-mcp; do
+              go build -trimpath -ldflags="-s -w" -o "dist/${cmd}_${GOOS}_${GOARCH}" "./cmd/$cmd"
+            done
           done
-          (cd dist && sha256sum *.tar.gz > checksums.txt)
+          (cd dist && sha256sum * > checksums.txt)
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --generate-notes
+        run: gh release create "${{ steps.version.outputs.tag }}" dist/* --target "$GITHUB_SHA" --generate-notes
