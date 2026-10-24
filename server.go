@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -234,6 +235,40 @@ func newServer(m clientFn) *mcp.Server {
 		func(c *Client, in notifications) (any, error) {
 			return c.Notifications(or(in.Limit, 20), in.UnreadOnly)
 		})
+
+	type whatsNew struct {
+		Days      int     `json:"days,omitempty" jsonschema:"how far back to look, default 7"`
+		CourseIDs []int64 `json:"course_ids,omitempty" jsonschema:"defaults to current courses"`
+	}
+	tool(s, m, "moodle_whats_new", read,
+		"What changed in your courses recently: activities with new or replaced files (contentfiles), new forum "+
+			"discussions or posts, new intro text, etc. Each item has the course, section, activity, what changed, "+
+			"and its current files. Use it for 'what did my professors upload/post this week?'.",
+		func(c *Client, in whatsNew) (any, error) {
+			return c.Updates(in.CourseIDs, time.Now().Add(-time.Duration(or(in.Days, 7))*24*time.Hour).Unix())
+		})
+
+	type calendar struct {
+		DaysAhead int `json:"days_ahead,omitempty" jsonschema:"default 14"`
+		DaysBack  int `json:"days_back,omitempty" jsonschema:"default 0"`
+	}
+	tool(s, m, "moodle_calendar", read,
+		"Everything on your Moodle calendar in a date range: due dates, lecture attendance sessions, course and "+
+			"personal events, with start time and duration. Unlike moodle_deadlines it includes events that aren't "+
+			"assignments and things you've already submitted.",
+		func(c *Client, in calendar) (any, error) {
+			now := time.Now()
+			return c.Calendar(now.AddDate(0, 0, -in.DaysBack).Unix(), now.AddDate(0, 0, or(in.DaysAhead, 14)).Unix())
+		})
+
+	type syncIn struct {
+		Dest      string  `json:"dest,omitempty" jsonschema:"folder to sync into, default ~/Moodle"`
+		CourseIDs []int64 `json:"course_ids,omitempty" jsonschema:"defaults to current courses"`
+	}
+	tool(s, m, "moodle_sync", save,
+		"Download every course file into a local folder (default ~/Moodle/<course>/<section>/), skipping files "+
+			"that are already up to date, so repeat runs only fetch what's new. Returns the files downloaded.",
+		func(c *Client, in syncIn) (any, error) { return c.Sync(or(in.Dest, "~/Moodle"), in.CourseIDs) })
 
 	type submit struct {
 		AssignID         int64    `json:"assign_id"`

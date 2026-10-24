@@ -34,7 +34,7 @@ This downloads the latest release, checks its checksum, and puts two commands in
 
 You can also grab the binaries by hand from the [latest release](https://github.com/OmarAli-prod/zewailcity-moodle-mcp/releases/latest). They're plain, static executables named `moodle_linux_amd64`, `moodle-mcp_darwin_arm64` and so on. Download one, `chmod +x` it, and run it.
 
-On Windows, or if you'd rather build it yourself, install [Go](https://go.dev/dl/) 1.25+ and run:
+On Windows, or if you'd rather build it yourself, install [Go](https://go.dev/dl/) 1.26+ and run:
 
 ```bash
 go install github.com/OmarAli-prod/zewailcity-moodle-mcp/cmd/...@latest   # or: go install ./cmd/... from a clone
@@ -82,6 +82,17 @@ Open Settings > Developer > Edit Config and add the server:
 
 Use the full path that `which moodle-mcp` prints (on Windows, `where moodle-mcp`, with each `\` written as `\\`). Desktop apps don't always inherit your terminal's `PATH`. Quit and reopen Claude Desktop afterwards.
 
+### Updating
+
+Run the install command again. It replaces both binaries and the skill with the latest release, and keeps your saved token. Then restart Claude so it loads the new server.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/OmarAli-prod/zewailcity-moodle-mcp/main/install.sh | sh
+moodle version    # shows the release you're on
+```
+
+If you installed with `go install`, run the same `go install` command again (or `git pull && go install ./cmd/...` in a clone).
+
 ## Tools
 
 | Tool                              | What it does                                                               |
@@ -99,6 +110,9 @@ Use the full path that `which moodle-mcp` prints (on Windows, `where moodle-mcp`
 | `moodle_announcements`          | Latest posts in each course's Announcements forum                          |
 | `moodle_discussion`             | Every post in one forum thread                                             |
 | `moodle_notifications`          | The bell-icon notifications: grades, feedback, reminders                   |
+| `moodle_whats_new`              | What professors uploaded, replaced or posted in the last few days          |
+| `moodle_calendar`               | Everything on the calendar, including lecture sessions                     |
+| `moodle_sync`                   | Download every course file into `~/Moodle`, fetching only what's new       |
 | `moodle_whoami`                 | Check the connection                                                       |
 | `moodle_functions`              | List the raw API functions your token is allowed to call                   |
 | `moodle_call`                   | Call any of those functions directly (the escape hatch)                    |
@@ -148,15 +162,33 @@ moodle grades [COURSE_ID]
 moodle file FILEURL                   print a file's text
 moodle download FILEURL [--to DIR]
 moodle news | notifications | search QUERY
+moodle new [--days 7]                 what professors uploaded or posted lately
+moodle calendar [YYYY-MM]             month grid of deadlines and lectures
+moodle sync [DIR]                     download all course files (default ~/Moodle)
 moodle functions [FILTER]             what your token can call
 moodle call WSFUNCTION '{"json": "params"}'
-moodle logout                         delete the saved token
+moodle version | logout
 ```
 
 ```console
-$ moodle courses
-  2392  MATH104-FALL2026-LCTR02    Linear Algebra
-  2547  SW401-FALL2026-LCTR01      Parallel and Distributed Computing
+$ moodle calendar
+           October 2026
+  Sun  Mon  Tue  Wed  Thu  Fri  Sat
+                        1    2    3
+    4    5   6*    7    8    9   10
+   11   12  13*   14   15   16  17*
+   18   19  20*   21   22  23*   24
+ [25]   26  27*  28*   29   30   31
+
+* = something that day, [ ] = today
+
+Tue Oct 27 11:00 AM  SWAPD402  Lecture Attendance (60 min)
+Wed Oct 28 12:00 AM  SWAPD402  Project Phase 1 is due
+
+$ moodle sync
+↓ MATH104 Linear Algebra/Week 5/5. Math104_WK4_Sec.3.1, 3.2.pptx
+↓ MATH104 Linear Algebra/Sheets/sheet 2-F26.pdf
+2 downloaded, 45 already up to date, in /Users/you/Moodle
 ```
 
 A course id is the number in `course/view.php?id=…`, and a cmid is the number in any `mod/<type>/view.php?id=…` link. Claude looks these up on its own, so you only need them for the CLI.
@@ -184,7 +216,7 @@ npx @modelcontextprotocol/inspector moodle-mcp    # click through the tools in a
 
 - Your token sits in `~/.config/moodle-mcp/config.json`, readable only by your user account, and goes nowhere except `moodle.zewailcity.edu.eg`. `moodle logout` deletes it.
 - Anything a tool returns becomes part of your conversation with Claude, the same as text you paste in yourself.
-- Three tools can change things. `moodle_download` saves a file to your computer, while `moodle_submit_assignment` and `moodle_call` can write to Moodle. The other fourteen only read.
+- Four tools can change things. `moodle_download` and `moodle_sync` save files to your computer, while `moodle_submit_assignment` and `moodle_call` can write to Moodle. The other sixteen only read.
 - `moodle_submit_assignment` saves a draft unless you tell it to finalise, and Claude is told to show you the exact content before sending it.
 - Check your course's AI policy before you use this on graded work.
 

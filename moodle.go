@@ -308,8 +308,12 @@ func (c *Client) CourseContents(courseID int64, descriptions bool) ([]M, error) 
 			for _, f := range list(m["contents"]) {
 				switch str(f["type"]) {
 				case "file":
-					files = append(files, M{"filename": f["filename"], "fileurl": f["fileurl"], "size": f["filesize"],
-						"modified": FmtTime(num(f["timemodified"]))})
+					file := M{"filename": f["filename"], "fileurl": f["fileurl"], "size": f["filesize"],
+						"modified": FmtTime(num(f["timemodified"])), "modified_ts": num(f["timemodified"])}
+					if p := strings.Trim(str(f["filepath"]), "/"); p != "" {
+						file["path"] = p // subfolder inside a Folder activity
+					}
+					files = append(files, file)
 				case "url":
 					if m["modname"] == "url" && mod["external_url"] == nil {
 						mod["external_url"] = f["fileurl"]
@@ -871,6 +875,197 @@ func (c *Client) FileText(fileurl string) (string, error) {
 		return "", err
 	}
 	return ExtractText(data, ctype, name)
+}
+
+// ---------------------------------------------------------------- what's new / calendar / sync
+
+// coursesFor returns the given courses (from every enrolment) or, by default, the current ones.
+func (c *Client) coursesFor(ids []int64) ([]M, error) {
+	if len(ids) == 0 {
+		return c.Courses("inprogress")
+	}
+	all, err := c.Courses("all")
+	var out []M
+	for _, crs := range all {
+		for _, id := range ids {
+			if crs["id"] == id {
+				out = append(out, crs)
+			}
+		}
+	}
+	return out, err
+}
+
+// Updates lists activities that gained files, forum posts or other content since a Unix time.
+func (c *Client) Updates(courseIDs []int64, since int64) ([]M, error) {
+	courses, err := c.coursesFor(courseIDs)
+	if err != nil {
+		return nil, err
+	}
+	out := []M{}
+	for _, crs := range courses {
+		id := crs["id"].(int64)
+		res, err := c.Call("core_course_get_updates_since", M{"courseid": id, "since": since})
+		if err != nil {
+			return nil, err
+		}
+		insts := list(obj(res)["instances"])
+		if len(insts) == 0 {
+			continue
+		}
+		secs, err := c.CourseContents(id, false)
+		if err != nil {
+			return nil, err
+		}
+		mods, sections := map[int64]M{}, map[int64]any{}
+		for _, s := range secs {
+			for _, m := range s["modules"].([]M) {
+				mods[m["cmid"].(int64)], sections[m["cmid"].(int64)] = m, s["name"]
+			}
+		}
+		for _, in := range insts {
+			m := mods[num(in["id"])]
+			if in["contextlevel"] != "module" || m == nil {
+				continue
+			}
+			var changed []string
+			var when int64
+			for _, upd := range list(in["updates"]) {
+				// ponytail: "configuration" is a teacher editing settings; never worth reporting.
+				if n := str(upd["name"]); n != "configuration" {
+					changed = append(changed, n)
+					when = max(when, num(upd["timeupdated"]))
+				}
+			}
+			if changed == nil {
+				continue
+			}
+			item := M{"course": crs["shortname"], "course_id": id, "section": sections[num(in["id"])], "cmid": m["cmid"],
+				"type": m["type"], "name": m["name"], "changed": changed, "url": m["url"]}
+			if when != 0 {
+				item["when"] = FmtTime(when)
+			}
+			if m["files"] != nil {
+				item["files"] = m["files"]
+			}
+			out = append(out, item)
+		}
+	}
+	return out, nil
+}
+
+// Calendar lists every calendar event in your courses between two Unix times: due dates,
+// attendance (lecture) sessions, course and personal events.
+func (c *Client) Calendar(from, to int64) ([]M, error) {
+	courses, err := c.Courses("inprogress")
+	if err != nil {
+		return nil, err
+	}
+	ids, names := []int64{}, map[int64]any{}
+	for _, crs := range courses {
+		ids = append(ids, crs["id"].(int64))
+		names[crs["id"].(int64)] = crs["shortname"]
+	}
+	res, err := c.Call("core_calendar_get_calendar_events", M{"events": M{"courseids": ids},
+		"options": M{"userevents": true, "siteevents": true, "timestart": from, "timeend": to}})
+	if err != nil {
+		return nil, err
+	}
+	out := []M{}
+	for _, e := range list(obj(res)["events"]) {
+		ts := num(e["timestart"])
+		ev := M{"name": u(e["name"]), "type": e["eventtype"], "course": names[num(e["courseid"])], "course_id": num(e["courseid"]),
+			"module": e["modulename"], "start": FmtTime(ts), "start_ts": ts, "duration_min": num(e["timeduration"]) / 60}
+		if loc := str(e["location"]); loc != "" {
+			ev["location"] = loc
+		}
+		if d := HTMLToText(str(e["description"])); d != "" {
+			ev["description"] = cut(d, 500)
+		}
+		out = append(out, ev)
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i]["start_ts"].(int64) < out[j]["start_ts"].(int64) })
+	return out, nil
+}
+
+// Sync mirrors every course file into dest/<course>/<section>/, downloading only files that
+// are new or changed since the last run (same size and modified time means up to date).
+func (c *Client) Sync(dest string, courseIDs []int64) (M, error) {
+	courses, err := c.coursesFor(courseIDs)
+	if err != nil {
+		return nil, err
+	}
+	root := expandHome(dest)
+	downloaded, failed, upToDate := []string{}, []M{}, 0
+	for _, crs := range courses {
+		code, _, _ := strings.Cut(str(crs["shortname"]), "-") // "MATH104-FALL2026-LCTR02" -> "MATH104"
+		courseDir := filepath.Join(root, safeName(code+" "+str(crs["fullname"])))
+		secs, err := c.CourseContents(crs["id"].(int64), false)
+		if err != nil {
+			return nil, err
+		}
+		seen := map[string]bool{}
+		for _, s := range secs {
+			section := safeName(str(s["name"]))
+			if section == "" {
+				section = "General"
+			}
+			for _, m := range s["modules"].([]M) {
+				files, _ := m["files"].([]M)
+				for _, f := range files {
+					dir := filepath.Join(courseDir, section)
+					if m["type"] == "folder" {
+						dir = filepath.Join(dir, safeName(str(m["name"])))
+						for _, part := range strings.Split(str(f["path"]), "/") {
+							if part = safeName(part); part != "" {
+								dir = filepath.Join(dir, part)
+							}
+						}
+					}
+					p := filepath.Join(dir, safeName(str(f["filename"])))
+					if seen[p] { // two activities in one section with the same file name
+						ext := filepath.Ext(p)
+						p = fmt.Sprintf("%s (%v)%s", strings.TrimSuffix(p, ext), m["cmid"], ext)
+					}
+					seen[p] = true
+					rel, _ := filepath.Rel(root, p)
+					mod := time.Unix(num(f["modified_ts"]), 0)
+					if fi, err := os.Stat(p); err == nil && fi.Size() == num(f["size"]) && fi.ModTime().Equal(mod) {
+						upToDate++
+						continue
+					}
+					if err := c.saveFile(str(f["fileurl"]), p, mod); err != nil {
+						failed = append(failed, M{"file": rel, "error": err.Error()})
+						continue
+					}
+					downloaded = append(downloaded, rel)
+				}
+			}
+		}
+	}
+	return M{"folder": root, "downloaded": downloaded, "up_to_date": upToDate, "failed": failed}, nil
+}
+
+func (c *Client) saveFile(fileurl, p string, mod time.Time) error {
+	data, _, _, err := c.FetchFile(fileurl)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(p, data, 0o644); err != nil {
+		return err
+	}
+	return os.Chtimes(p, mod, mod)
+}
+
+var unsafeChars = regexp.MustCompile(`[<>:"/\\|?*\x00-\x1f]`)
+
+// safeName makes one path component valid on macOS, Linux and Windows.
+func safeName(s string) string {
+	s = strings.Trim(unsafeChars.ReplaceAllString(s, "_"), " .")
+	return cut(s, 100)
 }
 
 // ---------------------------------------------------------------- writes

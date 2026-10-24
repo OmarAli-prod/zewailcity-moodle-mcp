@@ -45,7 +45,7 @@ jobs:
           for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
             export GOOS=${target%/*} GOARCH=${target#*/}
             for cmd in moodle moodle-mcp; do
-              go build -trimpath -ldflags="-s -w" -o "dist/${cmd}_${GOOS}_${GOARCH}" "./cmd/$cmd"
+              go build -trimpath -ldflags="-s -w -X main.version=${{ steps.version.outputs.tag }}" -o "dist/${cmd}_${GOOS}_${GOARCH}" "./cmd/$cmd"
             done
           done
           (cd dist && sha256sum * > checksums.txt)

@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	moodle "github.com/OmarAli-prod/zewailcity-moodle-mcp"
 	"golang.org/x/term"
@@ -31,6 +32,7 @@ The token is stored in %[2]s (readable only by you).
 const usage = `usage: moodle [--json] <command> [args]
 
   auth                                save your Moodle token
+  version                             which build this is
   logout                              delete the saved token
   whoami                              check the connection
   due [--days 14] [--back 14]         upcoming + overdue deadlines
@@ -42,9 +44,15 @@ const usage = `usage: moodle [--json] <command> [args]
   file FILEURL                        print a file's text
   download FILEURL [--to DIR]
   news | notifications | search QUERY
-  functions [FILTER]                  what your token can call
+  new [--days 7]                      what professors uploaded or posted lately
+  calendar [YYYY-MM]                  month grid of deadlines and lectures
+  sync [DIR]                          download all course files (default ~/Moodle)
+  functions [FILTER]                 what your token can call
   call WSFUNCTION '{"json": "params"}'
 `
+
+// version is set by the release build (-ldflags "-X main.version=v0.2.1").
+var version = "dev"
 
 func main() {
 	asJSON := flag.Bool("json", false, "raw JSON output")
@@ -57,6 +65,9 @@ func main() {
 	}
 	cmd, rest := args[0], args[1:]
 	switch cmd {
+	case "version":
+		fmt.Println("moodle", version)
+		return
 	case "auth":
 		auth()
 		return
@@ -182,6 +193,51 @@ func run(c *moodle.Client, cmd string, rest []string, asJSON bool) error {
 			fmt.Println(p)
 		}
 		return err
+	case "new":
+		fs := flag.NewFlagSet("new", flag.ExitOnError)
+		days := fs.Int("days", 7, "how far back to look")
+		_ = fs.Parse(rest)
+		items, err := c.Updates(nil, time.Now().AddDate(0, 0, -*days).Unix())
+		if err != nil || asJSON {
+			return show(items, err)
+		}
+		if len(items) == 0 {
+			fmt.Printf("Nothing new in the last %d days.\n", *days)
+		}
+		for _, x := range items {
+			fmt.Printf("%-26v %v › %v  [%s]\n", x["course"], x["section"], x["name"], strings.Join(x["changed"].([]string), ", "))
+			files, _ := x["files"].([]moodle.M)
+			for _, f := range files {
+				fmt.Printf("%27s%v\n", "", f["filename"])
+			}
+		}
+		return nil
+	case "calendar":
+		month := time.Now()
+		if arg(0) != "" {
+			month, err = time.ParseInLocation("2006-01", arg(0), time.Local)
+			check(err)
+		}
+		first := time.Date(month.Year(), month.Month(), 1, 0, 0, 0, 0, time.Local)
+		events, err := c.Calendar(first.Unix(), first.AddDate(0, 1, 0).Unix()-1)
+		if err != nil || asJSON {
+			return show(events, err)
+		}
+		printMonth(first, events)
+		return nil
+	case "sync":
+		res, err := c.Sync(or(arg(0), "~/Moodle"), nil)
+		if err != nil || asJSON {
+			return show(res, err)
+		}
+		for _, p := range res["downloaded"].([]string) {
+			fmt.Println("↓", p)
+		}
+		for _, f := range res["failed"].([]moodle.M) {
+			fmt.Println("✗", f["file"], "-", f["error"])
+		}
+		fmt.Printf("%d downloaded, %v already up to date, in %v\n", len(res["downloaded"].([]string)), res["up_to_date"], res["folder"])
+		return nil
 	case "news":
 		out, err = c.Announcements(nil, 5)
 	case "notifications":
@@ -224,6 +280,49 @@ func auth() {
 	check(moodle.SaveToken(token))
 	fmt.Printf("✓ Signed in as %v (%v). %v web-service functions available.\n",
 		who["fullname"], who["username"], who["functions_available"])
+}
+
+// printMonth draws a Sunday-first month grid (the Zewail week), marks days with events,
+// brackets today, and lists the events underneath.
+func printMonth(first time.Time, events []moodle.M) {
+	byDay := map[int][]moodle.M{}
+	for _, e := range events {
+		d := time.Unix(e["start_ts"].(int64), 0)
+		byDay[d.Day()] = append(byDay[d.Day()], e)
+	}
+	title := first.Format("January 2006")
+	fmt.Printf("%*s\n", (35+len(title))/2, title)
+	fmt.Println("  Sun  Mon  Tue  Wed  Thu  Fri  Sat")
+	fmt.Print(strings.Repeat("     ", int(first.Weekday())))
+	today, days := time.Now(), first.AddDate(0, 1, -1).Day()
+	for d := 1; d <= days; d++ {
+		cell := strconv.Itoa(d)
+		if len(byDay[d]) > 0 {
+			cell += "*"
+		}
+		if first.Year() == today.Year() && first.Month() == today.Month() && d == today.Day() {
+			cell = "[" + cell + "]"
+		}
+		fmt.Printf("%5s", cell)
+		if (int(first.Weekday())+d)%7 == 0 || d == days {
+			fmt.Println()
+		}
+	}
+	if len(events) == 0 {
+		fmt.Println("\nNothing on the calendar this month.")
+		return
+	}
+	fmt.Println("\n* = something that day, [ ] = today")
+	fmt.Println()
+	for _, e := range events {
+		start := time.Unix(e["start_ts"].(int64), 0)
+		length := ""
+		if m := e["duration_min"].(int64); m > 0 {
+			length = fmt.Sprintf(" (%d min)", m)
+		}
+		code, _, _ := strings.Cut(fmt.Sprint(e["course"]), "-")
+		fmt.Printf("%-10s %8s  %-9s %v%s\n", start.Format("Mon Jan 2"), start.Format("3:04 PM"), code, e["name"], length)
+	}
 }
 
 func show(v any, err error) error {

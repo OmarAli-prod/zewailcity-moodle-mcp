@@ -256,7 +256,7 @@ func TestServerTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Tools) != 17 { // bump this when you add a tool
+	if len(res.Tools) != 20 { // bump this when you add a tool
 		t.Errorf("%d tools registered", len(res.Tools))
 	}
 	writable := map[string]bool{}
@@ -268,8 +268,8 @@ func TestServerTools(t *testing.T) {
 			writable[tl.Name] = true
 		}
 	}
-	want := map[string]bool{"moodle_submit_assignment": true, "moodle_call": true, "moodle_download": true}
-	if len(writable) != len(want) || !writable["moodle_submit_assignment"] || !writable["moodle_call"] || !writable["moodle_download"] {
+	want := map[string]bool{"moodle_submit_assignment": true, "moodle_call": true, "moodle_download": true, "moodle_sync": true}
+	if len(writable) != len(want) || !writable["moodle_submit_assignment"] || !writable["moodle_call"] || !writable["moodle_download"] || !writable["moodle_sync"] {
 		t.Errorf("writable tools: %v", writable)
 	}
 
@@ -340,5 +340,66 @@ func TestSaveSubmissionUploadsThenSaves(t *testing.T) {
 	}
 	if obj(res["status_now"])["submission"] != "submitted" || res["submitted_for_grading"] != true {
 		t.Errorf("result: %v", res)
+	}
+}
+
+// courseSite fakes one course with a single lecture file, for the what's-new and sync tests.
+func courseSite(t *testing.T, fileHits *int) *Client {
+	var c *Client
+	c = fake(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "pluginfile.php") {
+			*fileHits++
+			_, _ = w.Write([]byte("slides"))
+			return
+		}
+		_ = r.ParseForm()
+		switch r.PostForm.Get("wsfunction") {
+		case "core_course_get_enrolled_courses_by_timeline_classification":
+			jsonReply(M{"courses": []M{{"id": 7, "shortname": "MATH104-FALL2026-LCTR02", "fullname": "Linear Algebra -MATH104-FALL2026-LCTR02"}}})(w, r)
+		case "core_course_get_contents":
+			jsonReply([]M{{"section": 1, "name": "Week 1", "modules": []M{
+				{"id": 11, "modname": "resource", "name": "Lecture 1", "url": "u", "contents": []M{{"type": "file",
+					"filename": "Lec 1: intro.pdf", "filesize": 6, "timemodified": 1792000000,
+					"fileurl": c.URL + "/webservice/pluginfile.php/1/mod_resource/content/0/lec1.pdf"}}},
+				{"id": 12, "modname": "label", "name": "Note"}}}})(w, r)
+		case "core_course_get_updates_since":
+			jsonReply(M{"instances": []M{
+				{"contextlevel": "module", "id": 11, "updates": []M{{"name": "contentfiles", "timeupdated": 1792000000}}},
+				{"contextlevel": "module", "id": 12, "updates": []M{{"name": "configuration"}}}}})(w, r)
+		default:
+			t.Errorf("unexpected call %s", r.PostForm.Get("wsfunction"))
+		}
+	})
+	return c
+}
+
+func TestUpdatesSkipsSettingsOnlyChanges(t *testing.T) {
+	var hits int
+	ups, err := courseSite(t, &hits).Updates(nil, 0)
+	if err != nil || len(ups) != 1 {
+		t.Fatalf("got %v, %v", ups, err)
+	}
+	if ups[0]["name"] != "Lecture 1" || ups[0]["section"] != "Week 1" || ups[0]["files"] == nil {
+		t.Errorf("got %v", ups[0])
+	}
+}
+
+func TestSyncDownloadsOnlyWhatChanged(t *testing.T) {
+	var hits int
+	c, dir := courseSite(t, &hits), t.TempDir()
+	res, err := c.Sync(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join("MATH104 Linear Algebra", "Week 1", "Lec 1_ intro.pdf")
+	if got := res["downloaded"].([]string); len(got) != 1 || got[0] != want {
+		t.Errorf("downloaded %v, want %s", got, want)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, want)); string(b) != "slides" {
+		t.Errorf("file content %q", b)
+	}
+	res, _ = c.Sync(dir, nil)
+	if hits != 1 || res["up_to_date"] != 1 || len(res["downloaded"].([]string)) != 0 {
+		t.Errorf("second run re-downloaded: hits=%d %v", hits, res)
 	}
 }
