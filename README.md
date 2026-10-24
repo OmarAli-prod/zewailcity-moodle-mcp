@@ -84,14 +84,13 @@ Use the full path that `which moodle-mcp` prints (on Windows, `where moodle-mcp`
 
 ### Updating
 
-Run the install command again. It replaces both binaries and the skill with the latest release, and keeps your saved token. Then restart Claude so it loads the new server.
-
 ```bash
-curl -fsSL https://raw.githubusercontent.com/OmarAli-prod/zewailcity-moodle-mcp/main/install.sh | sh
-moodle version    # shows the release you're on
+moodle update
 ```
 
-If you installed with `go install`, run the same `go install` command again (or `git pull && go install ./cmd/...` in a clone).
+It downloads the latest release, checks its checksums, and swaps both binaries in place. It refreshes the skill and makes sure Claude Code's `moodle` server points at the new `moodle-mcp`, registering it if needed. Your saved token is untouched. Restart Claude afterwards to load the new server. `moodle version` shows which release you're on.
+
+On Windows, or if you installed with `go install`, run the same `go install` command again instead.
 
 ## Tools
 
@@ -150,7 +149,7 @@ In the Claude apps, zip the `zewail-moodle` folder and upload it under Settings 
 
 ## The `moodle` command
 
-Put `--json` before any command for raw output.
+Output is colored in a terminal (set `NO_COLOR=1` to turn that off). Put `--json` before any command for raw output.
 
 ```text
 moodle due [--days 14] [--back 14]    upcoming + overdue
@@ -167,6 +166,7 @@ moodle calendar [YYYY-MM]             month grid of deadlines and lectures
 moodle sync [DIR]                     download all course files (default ~/Moodle)
 moodle functions [FILTER]             what your token can call
 moodle call WSFUNCTION '{"json": "params"}'
+moodle update                         install the latest release, re-link it to Claude
 moodle version | logout
 ```
 

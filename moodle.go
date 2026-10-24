@@ -811,7 +811,7 @@ func (c *Client) Notifications(limit int, unreadOnly bool) ([]M, error) {
 		if text == "" {
 			text = str(n["fullmessage"])
 		}
-		out = append(out, M{"subject": u(n["subject"]), "read": n["read"], "when": FmtTime(num(n["timecreated"])),
+		out = append(out, M{"subject": u(n["subject"]), "read": n["read"], "when": FmtTime(num(n["timecreated"])), "when_ts": num(n["timecreated"]),
 			"text": cut(HTMLToText(text), 600), "url": n["contexturl"]})
 	}
 	return out, nil
